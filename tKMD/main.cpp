@@ -14,6 +14,14 @@ void Unload(PDRIVER_OBJECT DriverObject);
 
 ULONG64 GetSystemRoutineAddress(PCWSTR routineName);
 
+typedef struct _MODULE
+{
+	PVOID Modules;
+	int NumberOfModules;
+} MODULE;
+
+_MODULE GetModules(void);
+
 extern "C" NTSTATUS DriverEntry(
 	_In_ PDRIVER_OBJECT DriverObject,
 	_In_ PUNICODE_STRING RegistryPath
@@ -64,39 +72,10 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_LIST_MODULES:
 	{
 		DbgPrint("[*] IOCTL_LIST_MODULES\n");
-		ULONG szBuffer = 0;
 
-		if (NT_SUCCESS(status = AuxKlibInitialize()))
-		{
-			if (!NT_SUCCESS(status = AuxKlibQueryModuleInformation(&szBuffer, sizeof(AUX_MODULE_EXTENDED_INFO), nullptr)))
-			{
-				DbgPrint("[+] AuxKlibQueryModuleInformation failed: 0x%08X\n", status);
-				break;
-			}
-		}
-		else
-		{
-			DbgPrint("[+] AuxKlibInitialize failed: 0x%08X\n", status);
-			break;
-		}
-
-		auto modules = (PAUX_MODULE_EXTENDED_INFO)ExAllocatePool2(POOL_FLAG_PAGED, szBuffer, TAG);
-		if (modules == nullptr)
-		{
-			DbgPrint("[-] PAUX_MODULE_EXTENDED_INFO was null\n");
-			status = STATUS_INSUFFICIENT_RESOURCES;
-			break;
-		}
-
-		RtlZeroMemory(modules, szBuffer);
-
-		if (!NT_SUCCESS(status = AuxKlibQueryModuleInformation(&szBuffer, sizeof(AUX_MODULE_EXTENDED_INFO), modules)))
-		{
-			DbgPrint("[+] AuxKlibQueryModuleInformation failed: 0x%08X\n", status);
-			break;
-		}
-
-		auto numberOfModules = szBuffer / sizeof(AUX_MODULE_EXTENDED_INFO);
+		_MODULE module = GetModules();
+		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
+		int numberOfModules = module.NumberOfModules;
 
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(PMODULE_NAMES) * 256))
 		{
@@ -125,53 +104,27 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	}
 	case IOCTL_CALLBACK_PROCESS:
 	{
-		DbgPrint("[*] IOCTL_CALLBACK_PROCESS");
+		DbgPrint("[*] IOCTL_CALLBACK_PROCESS\n");
 		ULONG64 psSetCreateProcessNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateProcessNotifyRoutine");
+		DbgPrint("psSet: 0x%llx\n", psSetCreateProcessNotifyRoutine);
 		ULONG64 pspCreateProcessNotifyRoutineArray = psSetCreateProcessNotifyRoutine + PROCESS_NOTIFY_OFFSET;
-
-		ULONG szBuffer = 0;
-		
-		if (NT_SUCCESS(status = AuxKlibInitialize()))
-		{
-			if (!NT_SUCCESS(status = AuxKlibQueryModuleInformation(&szBuffer, sizeof(AUX_MODULE_EXTENDED_INFO), nullptr)))
-			{
-				DbgPrint("[+] AuxKlibQueryModuleInformation failed: 0x%08X\n", status);
-				break;
-			}
-		}
-		else
-		{
-			DbgPrint("[+] AuxKlibInitialize failed: 0x%08X\n", status);
-			break;
-		}
-
-		auto modules = (PAUX_MODULE_EXTENDED_INFO)ExAllocatePool2(POOL_FLAG_PAGED, szBuffer, TAG);
-		if (modules == nullptr)
-		{
-			DbgPrint("[-] PAUX_MODULE_EXTENDED_INFO was null\n");
-			status = STATUS_INSUFFICIENT_RESOURCES;
-			break;
-		}
-
-		RtlZeroMemory(modules, szBuffer);
-
-		if (!NT_SUCCESS(status = AuxKlibQueryModuleInformation(&szBuffer, sizeof(AUX_MODULE_EXTENDED_INFO), modules)))
-		{
-			DbgPrint("[+] AuxKlibQueryModuleInformation failed: 0x%08X\n", status);
-			break;
-		}
-
-		auto numberOfModules = szBuffer / sizeof(AUX_MODULE_EXTENDED_INFO);
+		DbgPrint("pspCreate: 0x%llx\n", pspCreateProcessNotifyRoutineArray);
 		ULONG64 arrayPointer = pspCreateProcessNotifyRoutineArray;
 
-		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_PROCESS) * 256))
+		_MODULE module = GetModules();
+		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
+		int numberOfModules = module.NumberOfModules;
+
+		DbgPrint("[*] number of modules: %d\n", numberOfModules);
+
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
 		{
 			DbgPrint("[!] Buffer too small to hold CALLBACK_PROCESS\n");
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
 		}
 
-		PCALLBACK_PROCESS callbackInfo = (PCALLBACK_PROCESS)Irp->UserBuffer;
+		PCALLBACK_INFO callbackInfo = (PCALLBACK_INFO)Irp->UserBuffer;
 
 		if (callbackInfo == nullptr)
 		{
@@ -183,22 +136,22 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		for (auto i = 0; i < 64; i++)
 		{
 			ULONG64 callbackAddress = *(PULONG64)(arrayPointer);
-			if (callbackAddress > 0)
-			{
-				ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
-				for (auto m = 0; m < numberOfModules; m++)
-				{
-					auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
-					auto endAddress = (ULONG64)(startAddress + modules[m].ImageSize);
+			DbgPrint("callback: 0x%llx\n", callbackAddress);
+			if (callbackAddress == 0) break;
 
-					if (rawPointer > startAddress && rawPointer < endAddress)
-					{
-						strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
-						callbackInfo[i].Address = rawPointer;
-						break;
-					}
+			ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
+			for (auto m = 0; m < numberOfModules; m++)
+			{
+				auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
+				auto endAddress = (ULONG64)(startAddress + modules[m].ImageSize);
+
+				if (rawPointer > startAddress && rawPointer < endAddress)
+				{
+					strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
+					callbackInfo[i].Address = rawPointer;
+					length += sizeof(CALLBACK_INFO);
+					break;
 				}
-				length += sizeof(CALLBACK_PROCESS);
 			}
 			arrayPointer += 8;
 		}
@@ -209,11 +162,89 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_CALLBACK_THREAD:
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_THREAD\n");
+
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
+		{
+			DbgPrint("[!] Buffer too small to hold CALLBACK_PROCESS\n");
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PCALLBACK_INFO callbackInfo = (PCALLBACK_INFO)Irp->UserBuffer;
+
+		ULONG64 psSetCreateThreadNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateThreadNotifyRoutine");
+		ULONG64 pspCreateThreadNotifyRoutine = psSetCreateThreadNotifyRoutine + THREAD_NOTIFY_OFFSET;
+		ULONG64 arrayPointer = pspCreateThreadNotifyRoutine;
+
+		_MODULE module = GetModules();
+		auto modules = (PAUX_MODULE_EXTENDED_INFO) module.Modules;
+		int numberOfModules = module.NumberOfModules;
+
+		for (auto i = 0; i < 256; i++)
+		{
+			auto callbackAddress = *(PULONG64)arrayPointer;
+			if (callbackAddress == 0) break;
+			ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
+
+			for (auto m = 0; m < numberOfModules; m++)
+			{
+				auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
+				auto endAddress = (ULONG64)startAddress + modules[m].ImageSize;
+
+				if (rawPointer > startAddress && rawPointer < endAddress)
+				{
+					strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
+					callbackInfo[i].Address = rawPointer;
+					length += sizeof(CALLBACK_INFO);
+					break;
+				}
+			}
+			arrayPointer += 8;
+		}
 		break;
 	}
 	case IOCTL_CALLBACK_IMAGE:
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_IMAGE\n");
+		
+		ULONG64 psSetLoadImageNotifyRoutine = GetSystemRoutineAddress(L"PsSetLoadImageNotifyRoutine");
+		ULONG64 pspLoadImageNotifyRoutine = psSetLoadImageNotifyRoutine + IMAGE_NOTIFY_OFFSET;
+		ULONG64 arrayPointer = pspLoadImageNotifyRoutine;
+		
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
+		{
+			DbgPrint("[!] Buffer too small to hold CALLBACK_PROCESS\n");
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PCALLBACK_INFO callbackInfo = (PCALLBACK_INFO)Irp->UserBuffer;
+
+		_MODULE module = GetModules();
+		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
+		int numberOfModules = module.NumberOfModules;
+
+		for (auto i = 0; i < 256; i++)
+		{
+			auto callbackAddress = *(PULONG64)arrayPointer;
+			if (callbackAddress == 0) break;
+			ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
+
+			for (auto m = 0; m < numberOfModules; m++)
+			{
+				auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
+				auto endAddress = (ULONG64)startAddress + modules[m].ImageSize;
+
+				if (rawPointer > startAddress && rawPointer < endAddress)
+				{
+					strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
+					callbackInfo[i].Address = rawPointer;
+					length += sizeof(CALLBACK_INFO);
+					break;
+				}
+			}
+			arrayPointer += 8;
+		}
 		break;
 	}
 	default:
@@ -254,4 +285,41 @@ ULONG64 GetSystemRoutineAddress(PCWSTR routineName)
 	RtlInitUnicodeString(&functionName, routineName);
 
 	return (ULONG64)MmGetSystemRoutineAddress(&functionName);
+}
+
+_MODULE GetModules(void)
+{
+	ULONG szBuffer = 0;
+	NTSTATUS status;
+
+	if (NT_SUCCESS(status = AuxKlibInitialize()))
+	{
+		if (!NT_SUCCESS(status = AuxKlibQueryModuleInformation(&szBuffer, sizeof(AUX_MODULE_EXTENDED_INFO), nullptr)))
+		{
+			DbgPrint("[+] AuxKlibQueryModuleInformation failed: 0x%08X\n", status);
+		}
+	}
+	else
+	{
+		DbgPrint("[+] AuxKlibInitialize failed: 0x%08X\n", status);
+	}
+
+	PVOID modules = (PAUX_MODULE_EXTENDED_INFO)ExAllocatePool2(POOL_FLAG_PAGED, szBuffer, TAG);
+
+	if (modules == nullptr)
+	{
+		DbgPrint("[-] PAUX_MODULE_EXTENDED_INFO was null\n");
+		status = STATUS_INSUFFICIENT_RESOURCES;
+	}
+
+	RtlZeroMemory(modules, szBuffer);
+
+	if (!NT_SUCCESS(status = AuxKlibQueryModuleInformation(&szBuffer, sizeof(AUX_MODULE_EXTENDED_INFO), modules)))
+	{
+		DbgPrint("[+] AuxKlibQueryModuleInformation failed: 0x%08X\n", status);
+	}
+
+	int numberOfModules = szBuffer / sizeof(AUX_MODULE_EXTENDED_INFO);
+
+	return _MODULE{ modules, numberOfModules };
 }
