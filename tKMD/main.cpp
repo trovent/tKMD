@@ -79,7 +79,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(PMODULE_NAMES) * 256))
 		{
-			DbgPrint("[!] Caller's buffer is too small to hold MODULE_NAMES\n");
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
 		}
@@ -88,7 +87,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 
 		if (names == nullptr)
 		{
-			DbgPrint("[!] PMODULE_NAMES was null\n");
 			status = STATUS_INSUFFICIENT_RESOURCES;
 			break;
 		}
@@ -105,21 +103,9 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_CALLBACK_PROCESS:
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_PROCESS\n");
-		ULONG64 psSetCreateProcessNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateProcessNotifyRoutine");
-		DbgPrint("psSet: 0x%llx\n", psSetCreateProcessNotifyRoutine);
-		ULONG64 pspCreateProcessNotifyRoutineArray = psSetCreateProcessNotifyRoutine + PROCESS_NOTIFY_OFFSET;
-		DbgPrint("pspCreate: 0x%llx\n", pspCreateProcessNotifyRoutineArray);
-		ULONG64 arrayPointer = pspCreateProcessNotifyRoutineArray;
-
-		_MODULE module = GetModules();
-		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
-		int numberOfModules = module.NumberOfModules;
-
-		DbgPrint("[*] number of modules: %d\n", numberOfModules);
 
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
 		{
-			DbgPrint("[!] Buffer too small to hold CALLBACK_PROCESS\n");
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
 		}
@@ -128,29 +114,37 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 
 		if (callbackInfo == nullptr)
 		{
-			DbgPrint("[!] PCALLBACK_PROCESS was null.\n");
 			status = STATUS_INSUFFICIENT_RESOURCES;
 			break;
 		}
 
+		ULONG64 psSetCreateProcessNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateProcessNotifyRoutine");
+		ULONG64 pspCreateProcessNotifyRoutineArray = psSetCreateProcessNotifyRoutine + PROCESS_NOTIFY_OFFSET;
+		ULONG64 arrayPointer = pspCreateProcessNotifyRoutineArray;
+
+		_MODULE module = GetModules();
+		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
+		int numberOfModules = module.NumberOfModules;
+
 		for (auto i = 0; i < 64; i++)
 		{
 			ULONG64 callbackAddress = *(PULONG64)(arrayPointer);
-			DbgPrint("callback: 0x%llx\n", callbackAddress);
-			if (callbackAddress == 0) break;
-
-			ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
-			for (auto m = 0; m < numberOfModules; m++)
+			if (callbackAddress > 0)
 			{
-				auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
-				auto endAddress = (ULONG64)(startAddress + modules[m].ImageSize);
+				ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
 
-				if (rawPointer > startAddress && rawPointer < endAddress)
+				for (auto m = 0; m < numberOfModules; m++)
 				{
-					strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
-					callbackInfo[i].Address = rawPointer;
-					length += sizeof(CALLBACK_INFO);
-					break;
+					auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
+					auto endAddress = (ULONG64)(startAddress + modules[m].ImageSize);
+
+					if (rawPointer > startAddress && rawPointer < endAddress)
+					{
+						strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
+						callbackInfo[i].Address = arrayPointer;
+						length += sizeof(CALLBACK_INFO);
+						break;
+					}
 				}
 			}
 			arrayPointer += 8;
@@ -165,7 +159,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
 		{
-			DbgPrint("[!] Buffer too small to hold CALLBACK_PROCESS\n");
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
 		}
@@ -180,23 +173,25 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		auto modules = (PAUX_MODULE_EXTENDED_INFO) module.Modules;
 		int numberOfModules = module.NumberOfModules;
 
-		for (auto i = 0; i < 256; i++)
+		for (auto i = 0; i < 64; i++)
 		{
 			auto callbackAddress = *(PULONG64)arrayPointer;
-			if (callbackAddress == 0) break;
-			ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
-
-			for (auto m = 0; m < numberOfModules; m++)
+			if (callbackAddress > 0)
 			{
-				auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
-				auto endAddress = (ULONG64)startAddress + modules[m].ImageSize;
+				ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
 
-				if (rawPointer > startAddress && rawPointer < endAddress)
+				for (auto m = 0; m < numberOfModules; m++)
 				{
-					strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
-					callbackInfo[i].Address = rawPointer;
-					length += sizeof(CALLBACK_INFO);
-					break;
+					auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
+					auto endAddress = (ULONG64)startAddress + modules[m].ImageSize;
+
+					if (rawPointer > startAddress && rawPointer < endAddress)
+					{
+						strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
+						callbackInfo[i].Address = arrayPointer;
+						length += sizeof(CALLBACK_INFO);
+						break;
+					}
 				}
 			}
 			arrayPointer += 8;
@@ -213,7 +208,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
 		{
-			DbgPrint("[!] Buffer too small to hold CALLBACK_PROCESS\n");
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
 		}
@@ -224,27 +218,51 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
 		int numberOfModules = module.NumberOfModules;
 
-		for (auto i = 0; i < 256; i++)
+		for (auto i = 0; i < 64; i++)
 		{
 			auto callbackAddress = *(PULONG64)arrayPointer;
-			if (callbackAddress == 0) break;
-			ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
-
-			for (auto m = 0; m < numberOfModules; m++)
+			if (callbackAddress > 0)
 			{
-				auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
-				auto endAddress = (ULONG64)startAddress + modules[m].ImageSize;
+				ULONG64 rawPointer = *(PULONG64)(callbackAddress & 0xfffffffffffffff8);
 
-				if (rawPointer > startAddress && rawPointer < endAddress)
+				for (auto m = 0; m < numberOfModules; m++)
 				{
-					strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
-					callbackInfo[i].Address = rawPointer;
-					length += sizeof(CALLBACK_INFO);
-					break;
+					auto startAddress = (ULONG64)modules[m].BasicInfo.ImageBase;
+					auto endAddress = (ULONG64)startAddress + modules[m].ImageSize;
+
+					if (rawPointer > startAddress && rawPointer < endAddress)
+					{
+						strcpy(callbackInfo[i].Module, (char*)modules[m].FullPathName);
+						callbackInfo[i].Address = arrayPointer;
+						length += sizeof(CALLBACK_INFO);
+						break;
+					}
 				}
 			}
 			arrayPointer += 8;
 		}
+		break;
+	}
+	case IOCTL_CALLBACK_REMOVE:
+	{
+		DbgPrint("[*] IOCTL_CALLBACK_REMOVE\n");
+
+		if (stack->Parameters.DeviceIoControl.InputBufferLength < (sizeof(TARGET_CALLBACK)))
+		{
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PTARGET_CALLBACK targetCallback = (PTARGET_CALLBACK)stack->Parameters.DeviceIoControl.Type3InputBuffer;
+
+		if (targetCallback == nullptr)
+		{
+			status = STATUS_INSUFFICIENT_RESOURCES;
+			break;
+		}
+
+		*(PULONG64)(targetCallback->Address) = (ULONG64)0x00;
+
 		break;
 	}
 	default:

@@ -1,6 +1,8 @@
 ﻿#include <Windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
+#include <sstream>
 #include "../tKMD/ioctl.h"
 
 void PrintCallbackInfo(CALLBACK_INFO callbacks[]);
@@ -71,6 +73,17 @@ int main(int argc, char * argv[])
 		
 		printf("[*] Listing image notify callbacks...\n");
 		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_IMAGE, nullptr, 0, &callbacks, sizeof(callbacks), nullptr, nullptr)) PrintCallbackInfo(callbacks);
+		break;
+	}
+	case 5:
+	{
+		unsigned long long address = strtoull(argv[2], NULL, 16);
+		
+		PTARGET_CALLBACK target = new TARGET_CALLBACK{ address };
+		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_REMOVE, target, sizeof(target), nullptr, 0, nullptr, nullptr))
+		{
+			printf("[*] Removed callback @ 0x%llx\n", address);
+		}
 		break;
 	}
 	}
