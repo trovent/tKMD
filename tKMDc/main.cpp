@@ -9,14 +9,6 @@ void PrintCallbackInfo(CALLBACK_INFO callbacks[]);
 
 int main(int argc, char * argv[])
 {
-	if (argc < 2)
-	{
-		printf("Usage: .exe <int:toggle>\n\t1: LIST KERNEL MODULES\n\t2: LIST PROCESSNOTIFY CALLBACKS\n\t3: LIST THREADNOTIFY CALLBACKS\n\t4: LIST IMAGENOTIFY CALLBACKS\n\t5: DISABLE CALLBACK <PVOID>\n");
-		return 1;
-	}
-
-	int toggle = atoi(argv[1]);
-
 	HANDLE hDriver;
 	BOOL success; 
 
@@ -27,6 +19,20 @@ int main(int argc, char * argv[])
 		printf("[-] failed to open a handle to the driver: %d\n", GetLastError());
 		return 1;
 	}
+
+	WINDOWS_VERSION version;
+	if (success = DeviceIoControl(hDriver, IOCTL_WINDOWS_VERSION, nullptr, 0, &version, sizeof(version), nullptr, nullptr))
+	{
+		printf("Built for Windows Version 10.0.26100\nCurrent Windows Version: %lu.%lu.%lu\n", version.MajorVersion, version.MinorVersion, version.BuildNumber);
+	}
+
+	if (argc < 2)
+	{
+		printf("Usage: .exe <int:toggle>\n\t1: LIST KERNEL MODULES\n\t2: LIST PROCESSNOTIFY CALLBACKS\n\t3: LIST THREADNOTIFY CALLBACKS\n\t4: LIST IMAGENOTIFY CALLBACKS\n\t5: DISABLE CALLBACK <PVOID>\n");
+		return 1;
+	}
+
+	int toggle = atoi(argv[1]);
 
 	switch (toggle)
 	{

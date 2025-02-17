@@ -262,7 +262,30 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		}
 
 		*(PULONG64)(targetCallback->Address) = (ULONG64)0x00;
+		length += sizeof(TARGET_CALLBACK);
 
+		break;
+	}
+	case IOCTL_WINDOWS_VERSION:
+	{
+		DbgPrint("[*] IOCTL_WINDOWS_VERSION\n");
+
+		RTL_OSVERSIONINFOW osInfo = { 0 };
+		osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXW);
+		status = RtlGetVersion(&osInfo);
+
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(WINDOWS_VERSION)))
+		{
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PWINDOWS_VERSION Version = (PWINDOWS_VERSION)Irp->UserBuffer;
+		Version->MajorVersion = osInfo.dwMajorVersion;
+		Version->MinorVersion = osInfo.dwMinorVersion;
+		Version->BuildNumber = osInfo.dwBuildNumber;
+
+		length += sizeof(WINDOWS_VERSION);
 		break;
 	}
 	default:
