@@ -5,11 +5,6 @@
     ((DeviceType) << 16) | ((Access) << 14) | ((Function) << 2) | (Method) \
 )
 
-#define PROCESS_NOTIFY_OFFSET 0x7af280
-#define THREAD_NOTIFY_OFFSET 0x7aee10
-#define IMAGE_NOTIFY_OFFSET 0x7aef90
-#define PS_PROTECTION_OFFSET 0x5fa
-
 #define tKMD_DEVICE 0x8000
 
 #define IOCTL_CALLBACK_PROCESS CTL_CODE(tKMD_DEVICE, 0x800, METHOD_NEITHER, FILE_ANY_ACCESS)
@@ -55,3 +50,16 @@ typedef struct _TARGET_PROCESS
 {
     int ProcessId;
 } TARGET_PROCESS, * PTARGET_PROCESS;
+
+typedef struct OFFSET
+{
+    ULONG PROCESS_NOTIFY_OFFSET;
+    ULONG THREAD_NOTIFY_OFFSET;
+    ULONG IMAGE_NOTIFY_OFFSET;
+    ULONG PS_PROTECTION_OFFSET;
+} * POFFSET;
+
+typedef struct _DRIVER_SUPPORT
+{
+    BOOLEAN supportedWindowsVersion = 0;
+} DRIVER_SUPPORT, * PDRIVER_SUPPORT;

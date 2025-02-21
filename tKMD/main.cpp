@@ -14,6 +14,11 @@ NTSTATUS CreateClose(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp);
 void Unload(PDRIVER_OBJECT DriverObject);
 
 ULONG64 GetSystemRoutineAddress(PCWSTR routineName);
+OFFSET SetOffsetsBasedOnWindowsVersion(void);
+RTL_OSVERSIONINFOW GetWindowsVersion(void);
+NTSTATUS CheckDriverSupport(PIRP Irp);
+
+OFFSET offset;
 
 typedef struct _MODULE
 {
@@ -55,6 +60,8 @@ extern "C" NTSTATUS DriverEntry(
 		IoDeleteDevice(deviceObject);
 		status = STATUS_FAILED_DRIVER_ENTRY;
 	}
+
+	offset = SetOffsetsBasedOnWindowsVersion();
 
 	return status;
 }
@@ -105,6 +112,27 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_PROCESS\n");
 
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
+		{
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
+		if (offset.PROCESS_NOTIFY_OFFSET != 0x00)
+		{
+			dSupport->supportedWindowsVersion = 1;
+		}
+		else
+		{
+			DbgPrint("[-] Not supported version\n");
+			break;
+		}
+
+		ULONG64 psSetCreateProcessNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateProcessNotifyRoutine");
+		ULONG64 pspCreateProcessNotifyRoutineArray = psSetCreateProcessNotifyRoutine + offset.PROCESS_NOTIFY_OFFSET;
+		ULONG64 arrayPointer = pspCreateProcessNotifyRoutineArray;
+
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
 		{
 			status = STATUS_BUFFER_TOO_SMALL;
@@ -118,10 +146,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 			status = STATUS_INSUFFICIENT_RESOURCES;
 			break;
 		}
-
-		ULONG64 psSetCreateProcessNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateProcessNotifyRoutine");
-		ULONG64 pspCreateProcessNotifyRoutineArray = psSetCreateProcessNotifyRoutine + PROCESS_NOTIFY_OFFSET;
-		ULONG64 arrayPointer = pspCreateProcessNotifyRoutineArray;
 
 		_MODULE module = GetModules();
 		auto modules = (PAUX_MODULE_EXTENDED_INFO)module.Modules;
@@ -158,6 +182,27 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_THREAD\n");
 
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
+		{
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
+		if (offset.THREAD_NOTIFY_OFFSET != 0x00)
+		{
+			dSupport->supportedWindowsVersion = 1;
+		}
+		else
+		{
+			DbgPrint("[-] Not supported version\n");
+			break;
+		}
+
+		ULONG64 psSetCreateThreadNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateThreadNotifyRoutine");
+		ULONG64 pspCreateThreadNotifyRoutine = psSetCreateThreadNotifyRoutine + offset.THREAD_NOTIFY_OFFSET;
+		ULONG64 arrayPointer = pspCreateThreadNotifyRoutine;
+
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
 		{
 			status = STATUS_BUFFER_TOO_SMALL;
@@ -165,10 +210,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		}
 
 		PCALLBACK_INFO callbackInfo = (PCALLBACK_INFO)Irp->UserBuffer;
-
-		ULONG64 psSetCreateThreadNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateThreadNotifyRoutine");
-		ULONG64 pspCreateThreadNotifyRoutine = psSetCreateThreadNotifyRoutine + THREAD_NOTIFY_OFFSET;
-		ULONG64 arrayPointer = pspCreateThreadNotifyRoutine;
 
 		_MODULE module = GetModules();
 		auto modules = (PAUX_MODULE_EXTENDED_INFO) module.Modules;
@@ -202,9 +243,26 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_CALLBACK_IMAGE:
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_IMAGE\n");
+
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
+		{
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
+		if (offset.IMAGE_NOTIFY_OFFSET != 0x00)
+		{
+			dSupport->supportedWindowsVersion = 1;
+		}
+		else
+		{
+			DbgPrint("[-] Not supported version\n");
+			break;
+		}
 		
 		ULONG64 psSetLoadImageNotifyRoutine = GetSystemRoutineAddress(L"PsSetLoadImageNotifyRoutine");
-		ULONG64 pspLoadImageNotifyRoutine = psSetLoadImageNotifyRoutine + IMAGE_NOTIFY_OFFSET;
+		ULONG64 pspLoadImageNotifyRoutine = psSetLoadImageNotifyRoutine + offset.IMAGE_NOTIFY_OFFSET;
 		ULONG64 arrayPointer = pspLoadImageNotifyRoutine;
 		
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(CALLBACK_INFO) * 256))
@@ -271,9 +329,7 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	{
 		DbgPrint("[*] IOCTL_WINDOWS_VERSION\n");
 
-		RTL_OSVERSIONINFOW osInfo = { 0 };
-		osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXW);
-		status = RtlGetVersion(&osInfo);
+		RTL_OSVERSIONINFOW osInfo = GetWindowsVersion();
 
 		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(WINDOWS_VERSION)))
 		{
@@ -292,15 +348,34 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_REMOVE_PS_PROTECTION:
 	{
 		DbgPrint("[*] IOCTL_REMOVE_PS_PROTECTION\n");
+
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
+		{
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+
+		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
+		if (offset.PS_PROTECTION_OFFSET != 0x00)
+		{
+			dSupport->supportedWindowsVersion = 1;
+		}
+		else
+		{
+			break;
+		}
+
 		PTARGET_PROCESS target = (PTARGET_PROCESS)stack->Parameters.DeviceIoControl.Type3InputBuffer;
 		PEPROCESS eProcess;
 		status = PsLookupProcessByProcessId((HANDLE)target->ProcessId, &eProcess);
-		PPS_PROTECTION psProtect = (PPS_PROTECTION)(((ULONG_PTR)eProcess) + PS_PROTECTION_OFFSET);
+		PPS_PROTECTION psProtect = (PPS_PROTECTION)(((ULONG_PTR)eProcess) + offset.PS_PROTECTION_OFFSET);
+		
 		if (psProtect == nullptr)
 		{
 			status = STATUS_INVALID_PARAMETER;
 			ObDereferenceObject(eProcess);
 		}
+
 		DbgPrint("[*] level:%d\n", psProtect->Level);
 		DbgPrint("[*] type:%d\n", psProtect->Type);
 		DbgPrint("[*] audit:%d\n", psProtect->Audit);
@@ -387,3 +462,41 @@ _MODULE GetModules(void)
 
 	return _MODULE{ modules, numberOfModules };
 }
+
+RTL_OSVERSIONINFOW GetWindowsVersion(void)
+{
+	NTSTATUS status;
+	RTL_OSVERSIONINFOW osInfo = { 0 };
+	osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXW);
+	status = RtlGetVersion(&osInfo);
+	return osInfo;
+}
+
+OFFSET SetOffsetsBasedOnWindowsVersion(void)
+{
+	RTL_OSVERSIONINFOW osInfo = GetWindowsVersion();
+	offset = { 0 };
+	if (osInfo.dwMajorVersion == 10 && osInfo.dwMinorVersion == 0 && osInfo.dwBuildNumber == 22621)
+	{
+		offset.PROCESS_NOTIFY_OFFSET = 0x004f18c0;
+		offset.IMAGE_NOTIFY_OFFSET = 0x004f1640;
+		offset.THREAD_NOTIFY_OFFSET = 0x004f1820;
+		offset.PS_PROTECTION_OFFSET = 0x87a;
+	}
+	else if (osInfo.dwMajorVersion == 10 && osInfo.dwMinorVersion == 0 && osInfo.dwBuildNumber == 26100)
+	{
+		offset.PROCESS_NOTIFY_OFFSET = 0x007af280;
+		offset.IMAGE_NOTIFY_OFFSET = 0x007aef90;
+		offset.THREAD_NOTIFY_OFFSET = 0x007aee10;
+		offset.PS_PROTECTION_OFFSET = 0x5fa;
+	}
+	else 
+	{
+		offset.PROCESS_NOTIFY_OFFSET = 0x00;
+		offset.IMAGE_NOTIFY_OFFSET = 0x00;
+		offset.THREAD_NOTIFY_OFFSET = 0x00;
+		offset.PS_PROTECTION_OFFSET = 0x00;
+	}
+	return offset;
+}
+

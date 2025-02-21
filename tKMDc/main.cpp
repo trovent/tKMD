@@ -23,13 +23,8 @@ int main(int argc, char * argv[])
 	WINDOWS_VERSION version;
 	if (success = DeviceIoControl(hDriver, IOCTL_WINDOWS_VERSION, nullptr, 0, &version, sizeof(version), nullptr, nullptr))
 	{
-		printf("Built for Windows Version 10.0.26100\nCurrent Windows Version: %lu.%lu.%lu\n", version.MajorVersion, version.MinorVersion, version.BuildNumber);
-		printf("Offsets set up as follows:\n"
-			"\tPROCESS_NOTIFY_OFFSET: 0x%llx\n"
-			"\tTHREAD_NOTIFY_OFFSET: 0x%llx\n"
-			"\tIMAGE_NOTIFY_OFFSET: 0x%llx\n"
-			"\tPS_PROTECTION_OFFSET: 0x%lx\n",
-			PROCESS_NOTIFY_OFFSET, THREAD_NOTIFY_OFFSET, IMAGE_NOTIFY_OFFSET, PS_PROTECTION_OFFSET);
+		printf("Current Windows Version: %lu.%lu.%lu\n", version.MajorVersion, version.MinorVersion, version.BuildNumber);
+		
 	}
 
 	if (argc < 2)
@@ -52,7 +47,7 @@ int main(int argc, char * argv[])
 	{
 		MODULE_NAMES modules[256];
 		RtlZeroMemory(modules, sizeof(modules));
-
+		
 		if (success = DeviceIoControl(hDriver, IOCTL_LIST_MODULES, nullptr, 0, &modules, sizeof(modules), nullptr, nullptr))
 		{
 			printf("[*] Listing all system modules...\n");
@@ -68,6 +63,17 @@ int main(int argc, char * argv[])
 	}
 	case 2:
 	{
+		DRIVER_SUPPORT dSupport = { 0 };
+
+		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_PROCESS, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		{
+			if (!dSupport.supportedWindowsVersion)
+			{
+				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
+				return 0;
+			}
+		}
+
 		CALLBACK_INFO callbacks[256];
 		RtlZeroMemory(callbacks, sizeof(callbacks));
 
@@ -77,6 +83,17 @@ int main(int argc, char * argv[])
 	}
 	case 3:
 	{
+		DRIVER_SUPPORT dSupport = { 0 };
+
+		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_THREAD, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		{
+			if (!dSupport.supportedWindowsVersion)
+			{
+				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
+				return 0;
+			}
+		}
+
 		CALLBACK_INFO callbacks[256];
 		RtlZeroMemory(callbacks, sizeof(callbacks));
 
@@ -86,6 +103,17 @@ int main(int argc, char * argv[])
 	}
 	case 4:
 	{
+		DRIVER_SUPPORT dSupport = { 0 };
+
+		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_IMAGE, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		{
+			if (!dSupport.supportedWindowsVersion)
+			{
+				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
+				return 0;
+			}
+		}
+
 		CALLBACK_INFO callbacks[256];
 		RtlZeroMemory(callbacks, sizeof(callbacks));
 		
@@ -106,6 +134,17 @@ int main(int argc, char * argv[])
 	}
 	case 6:
 	{
+		DRIVER_SUPPORT dSupport = { 0 };
+
+		if (success = DeviceIoControl(hDriver, IOCTL_REMOVE_PS_PROTECTION, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		{
+			if (!dSupport.supportedWindowsVersion)
+			{
+				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
+				return 0;
+			}
+		}
+
 		printf("[*] IOCTL_REMOVE_PS_PROTECTION\n");
 		PTARGET_PROCESS target = new TARGET_PROCESS{ atoi(argv[2]) };
 		if (success = DeviceIoControl(hDriver, IOCTL_REMOVE_PS_PROTECTION, target, sizeof(target), nullptr, 0, nullptr, nullptr))
