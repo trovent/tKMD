@@ -16,7 +16,6 @@ void Unload(PDRIVER_OBJECT DriverObject);
 ULONG64 GetSystemRoutineAddress(PCWSTR routineName);
 OFFSET SetOffsetsBasedOnWindowsVersion(void);
 RTL_OSVERSIONINFOW GetWindowsVersion(void);
-NTSTATUS CheckDriverSupport(PIRP Irp);
 
 OFFSET offset;
 
@@ -48,20 +47,22 @@ extern "C" NTSTATUS DriverEntry(
 
 	if (!IoCreateDevice(DriverObject, 0, &deviceName, FILE_DEVICE_UNKNOWN, 0, FALSE, &deviceObject))
 	{
-		DbgPrint("[!] CreateDevice: 0x%08X\n", status);
+		if (IoCreateSymbolicLink(&symLink, &deviceName))
+		{
+			DbgPrint("[-] failed to create symlink\n");
+			IoDeleteDevice(deviceObject);
+			status = STATUS_FAILED_DRIVER_ENTRY;
+		}
+		else
+		{
+			offset = SetOffsetsBasedOnWindowsVersion();
+		}
 	}
-
-	if (!IoCreateSymbolicLink(&symLink, &deviceName))
+	else 
 	{
-		DbgPrint("[!] CreateSymbolicLink: 0x%08X\n", status);
-	}
-	else {
-		DbgPrint("[-] failed to create symlink\n");
-		IoDeleteDevice(deviceObject);
+		DbgPrint("[-] failed to create device\n");
 		status = STATUS_FAILED_DRIVER_ENTRY;
 	}
-
-	offset = SetOffsetsBasedOnWindowsVersion();
 
 	return status;
 }
@@ -111,23 +112,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_CALLBACK_PROCESS:
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_PROCESS\n");
-
-		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
-		{
-			status = STATUS_BUFFER_TOO_SMALL;
-			break;
-		}
-
-		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
-		if (offset.PROCESS_NOTIFY_OFFSET != 0x00)
-		{
-			dSupport->supportedWindowsVersion = 1;
-		}
-		else
-		{
-			DbgPrint("[-] Not supported version\n");
-			break;
-		}
 
 		ULONG64 psSetCreateProcessNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateProcessNotifyRoutine");
 		ULONG64 pspCreateProcessNotifyRoutineArray = psSetCreateProcessNotifyRoutine + offset.PROCESS_NOTIFY_OFFSET;
@@ -182,23 +166,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_THREAD\n");
 
-		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
-		{
-			status = STATUS_BUFFER_TOO_SMALL;
-			break;
-		}
-
-		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
-		if (offset.THREAD_NOTIFY_OFFSET != 0x00)
-		{
-			dSupport->supportedWindowsVersion = 1;
-		}
-		else
-		{
-			DbgPrint("[-] Not supported version\n");
-			break;
-		}
-
 		ULONG64 psSetCreateThreadNotifyRoutine = GetSystemRoutineAddress(L"PsSetCreateThreadNotifyRoutine");
 		ULONG64 pspCreateThreadNotifyRoutine = psSetCreateThreadNotifyRoutine + offset.THREAD_NOTIFY_OFFSET;
 		ULONG64 arrayPointer = pspCreateThreadNotifyRoutine;
@@ -243,23 +210,6 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 	case IOCTL_CALLBACK_IMAGE:
 	{
 		DbgPrint("[*] IOCTL_CALLBACK_IMAGE\n");
-
-		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
-		{
-			status = STATUS_BUFFER_TOO_SMALL;
-			break;
-		}
-
-		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
-		if (offset.IMAGE_NOTIFY_OFFSET != 0x00)
-		{
-			dSupport->supportedWindowsVersion = 1;
-		}
-		else
-		{
-			DbgPrint("[-] Not supported version\n");
-			break;
-		}
 		
 		ULONG64 psSetLoadImageNotifyRoutine = GetSystemRoutineAddress(L"PsSetLoadImageNotifyRoutine");
 		ULONG64 pspLoadImageNotifyRoutine = psSetLoadImageNotifyRoutine + offset.IMAGE_NOTIFY_OFFSET;
@@ -325,6 +275,32 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 
 		break;
 	}
+	case IOCTL_REMOVE_PS_PROTECTION:
+	{
+		DbgPrint("[*] IOCTL_REMOVE_PS_PROTECTION\n");
+
+		PTARGET_PROCESS target = (PTARGET_PROCESS)stack->Parameters.DeviceIoControl.Type3InputBuffer;
+		PEPROCESS eProcess;
+		status = PsLookupProcessByProcessId((HANDLE)target->ProcessId, &eProcess);
+
+		PPS_PROTECTION psProtect = (PPS_PROTECTION)(((ULONG_PTR)eProcess) + offset.PS_PROTECTION_OFFSET);
+		
+		if (psProtect == nullptr)
+		{
+			status = STATUS_INVALID_PARAMETER;
+			ObDereferenceObject(eProcess);
+			break;
+		}
+
+		psProtect->Level = 0;
+		psProtect->Type = 0;
+		psProtect->Audit = 0;
+		psProtect->Signer = 0;
+
+		ObDereferenceObject(eProcess);
+
+		break;
+	}
 	case IOCTL_WINDOWS_VERSION:
 	{
 		DbgPrint("[*] IOCTL_WINDOWS_VERSION\n");
@@ -345,45 +321,22 @@ NTSTATUS DeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
 		length += sizeof(WINDOWS_VERSION);
 		break;
 	}
-	case IOCTL_REMOVE_PS_PROTECTION:
+	case IOCTL_SUPPORTED_VERSION:
 	{
-		DbgPrint("[*] IOCTL_REMOVE_PS_PROTECTION\n");
-
-		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(DRIVER_SUPPORT)))
+		if (stack->Parameters.DeviceIoControl.OutputBufferLength < (sizeof(OFFSET)))
 		{
 			status = STATUS_BUFFER_TOO_SMALL;
 			break;
 		}
 
-		PDRIVER_SUPPORT dSupport = (PDRIVER_SUPPORT)Irp->UserBuffer;
-		if (offset.PS_PROTECTION_OFFSET != 0x00)
-		{
-			dSupport->supportedWindowsVersion = 1;
-		}
-		else
-		{
-			break;
-		}
-
-		PTARGET_PROCESS target = (PTARGET_PROCESS)stack->Parameters.DeviceIoControl.Type3InputBuffer;
-		PEPROCESS eProcess;
-		status = PsLookupProcessByProcessId((HANDLE)target->ProcessId, &eProcess);
-		PPS_PROTECTION psProtect = (PPS_PROTECTION)(((ULONG_PTR)eProcess) + offset.PS_PROTECTION_OFFSET);
+		POFFSET pOffset = (POFFSET)Irp->UserBuffer;
+		pOffset->IMAGE_NOTIFY_OFFSET = offset.IMAGE_NOTIFY_OFFSET;
+		pOffset->THREAD_NOTIFY_OFFSET = offset.THREAD_NOTIFY_OFFSET;
+		pOffset->PROCESS_NOTIFY_OFFSET = offset.PROCESS_NOTIFY_OFFSET;
+		pOffset->PS_PROTECTION_OFFSET = offset.PS_PROTECTION_OFFSET;
 		
-		if (psProtect == nullptr)
-		{
-			status = STATUS_INVALID_PARAMETER;
-			ObDereferenceObject(eProcess);
-		}
+		length += sizeof(OFFSET);
 
-		DbgPrint("[*] level:%d\n", psProtect->Level);
-		DbgPrint("[*] type:%d\n", psProtect->Type);
-		DbgPrint("[*] audit:%d\n", psProtect->Audit);
-		DbgPrint("[*] signer:%d\n", psProtect->Signer);
-		psProtect->Level = 0;
-		psProtect->Type = 0;
-		psProtect->Audit = 0;
-		psProtect->Signer = 0;
 		break;
 	}
 	default:
@@ -506,4 +459,3 @@ OFFSET SetOffsetsBasedOnWindowsVersion(void)
 	}
 	return offset;
 }
-

@@ -1,16 +1,16 @@
 ﻿#include <Windows.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <iostream>
-#include <sstream>
 #include "../tKMD/ioctl.h"
 
 void PrintCallbackInfo(CALLBACK_INFO callbacks[]);
+OFFSET ValidateSupportedVersion(HANDLE hDriver);
 
 int main(int argc, char * argv[])
 {
 	HANDLE hDriver;
 	BOOL success; 
+	OFFSET offset;
 
 	hDriver = CreateFile(L"\\\\.\\tKMD", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
 
@@ -24,7 +24,6 @@ int main(int argc, char * argv[])
 	if (success = DeviceIoControl(hDriver, IOCTL_WINDOWS_VERSION, nullptr, 0, &version, sizeof(version), nullptr, nullptr))
 	{
 		printf("Current Windows Version: %lu.%lu.%lu\n", version.MajorVersion, version.MinorVersion, version.BuildNumber);
-		
 	}
 
 	if (argc < 2)
@@ -43,7 +42,7 @@ int main(int argc, char * argv[])
 
 	switch (toggle)
 	{
-	case 1: 
+	case 1: //LIST KERNEL MODULES
 	{
 		MODULE_NAMES modules[256];
 		RtlZeroMemory(modules, sizeof(modules));
@@ -61,17 +60,13 @@ int main(int argc, char * argv[])
 		}
 		break;
 	}
-	case 2:
+	case 2: //LIST PROCESSNOTIFY CALLBACKS
 	{
-		DRIVER_SUPPORT dSupport = { 0 };
-
-		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_PROCESS, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		offset = ValidateSupportedVersion(hDriver);
+		if (offset.PROCESS_NOTIFY_OFFSET == 0x00)
 		{
-			if (!dSupport.supportedWindowsVersion)
-			{
-				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
-				return 0;
-			}
+			printf("[-] Unfortunately, this Windows version is not supported for PROCESSNOTIFY CALLBACKS. Terminating...\n");
+			exit(1);
 		}
 
 		CALLBACK_INFO callbacks[256];
@@ -81,17 +76,13 @@ int main(int argc, char * argv[])
 		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_PROCESS, nullptr, 0, &callbacks, sizeof(callbacks), nullptr, nullptr)) PrintCallbackInfo(callbacks);
 		break;
 	}
-	case 3:
+	case 3: // LIST THREADNOTIFY CALLBACKS
 	{
-		DRIVER_SUPPORT dSupport = { 0 };
-
-		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_THREAD, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		offset = ValidateSupportedVersion(hDriver);
+		if (offset.THREAD_NOTIFY_OFFSET == 0x00)
 		{
-			if (!dSupport.supportedWindowsVersion)
-			{
-				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
-				return 0;
-			}
+			printf("[-] Unfortunately, this Windows version is not supported for THREADNOTIFY CALLBACKS. Terminating...\n");
+			exit(1);
 		}
 
 		CALLBACK_INFO callbacks[256];
@@ -101,17 +92,13 @@ int main(int argc, char * argv[])
 		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_THREAD, nullptr, 0, &callbacks, sizeof(callbacks), nullptr, nullptr)) PrintCallbackInfo(callbacks);
 		break;
 	}
-	case 4:
+	case 4: //LIST IMAGENOTIFY CALLBACKS
 	{
-		DRIVER_SUPPORT dSupport = { 0 };
-
-		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_IMAGE, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		offset = ValidateSupportedVersion(hDriver);
+		if (offset.IMAGE_NOTIFY_OFFSET == 0x00)
 		{
-			if (!dSupport.supportedWindowsVersion)
-			{
-				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
-				return 0;
-			}
+			printf("[-] Unfortunately, this Windows version is not supported for IMAGENOTIFY CALLBACKS. Terminating...\n");
+			exit(1);
 		}
 
 		CALLBACK_INFO callbacks[256];
@@ -121,8 +108,14 @@ int main(int argc, char * argv[])
 		if (success = DeviceIoControl(hDriver, IOCTL_CALLBACK_IMAGE, nullptr, 0, &callbacks, sizeof(callbacks), nullptr, nullptr)) PrintCallbackInfo(callbacks);
 		break;
 	}
-	case 5:
+	case 5: //DISABLE CALLBACK
 	{
+		if (argc < 3)
+		{
+			printf("[-] Callback's address to be provided\n");
+			exit(1);
+		}
+
 		unsigned long long address = strtoull(argv[2], NULL, 16);
 		
 		PTARGET_CALLBACK target = new TARGET_CALLBACK{ address };
@@ -132,29 +125,34 @@ int main(int argc, char * argv[])
 		}
 		break;
 	}
-	case 6:
+	case 6: //REMOVE PS_PROTECTION			
 	{
-		DRIVER_SUPPORT dSupport = { 0 };
-
-		if (success = DeviceIoControl(hDriver, IOCTL_REMOVE_PS_PROTECTION, nullptr, 0, &dSupport, sizeof(DRIVER_SUPPORT), nullptr, nullptr))
+		offset = ValidateSupportedVersion(hDriver);
+		if (offset.PS_PROTECTION_OFFSET == 0x00)
 		{
-			if (!dSupport.supportedWindowsVersion)
-			{
-				printf("[-] Unfortunatelly this Windows version is not supported by the driver. Terminating...\n");
-				return 0;
-			}
+			printf("[-] Unfortunately, this Windows version is not supported for PS_PROTECTION. Terminating...\n");
+			exit(1);
 		}
 
-		printf("[*] IOCTL_REMOVE_PS_PROTECTION\n");
+		if (argc < 3)
+		{
+			printf("[-] PID to be provided\n");
+			exit(1);
+		}
+
 		PTARGET_PROCESS target = new TARGET_PROCESS{ atoi(argv[2]) };
+
 		if (success = DeviceIoControl(hDriver, IOCTL_REMOVE_PS_PROTECTION, target, sizeof(target), nullptr, 0, nullptr, nullptr))
 		{
-			printf("[*] Removed protection from 0x%d\n", target);
+			printf("[*] Removed protection from %d\n", target->ProcessId);
+		}
+		else
+		{
+			printf("[-] error: 0x%d\n", GetLastError());
 		}
 		break;
 	}
 	}
-
 	CloseHandle(hDriver);
 }
 
@@ -165,4 +163,15 @@ void PrintCallbackInfo(CALLBACK_INFO callbacks[])
 		if (callbacks[i].Address == 0) continue;
 		printf("\t[%d] 0x%llx -> %s\n", i, callbacks[i].Address, callbacks[i].Module);
 	}
+}
+
+OFFSET ValidateSupportedVersion(HANDLE hDriver)
+{
+	OFFSET offset;
+	if (!DeviceIoControl(hDriver, IOCTL_SUPPORTED_VERSION, nullptr, 0, &offset, sizeof(OFFSET), nullptr, nullptr))
+	{
+		printf("[-] IOCTL_SUPPORTED_VERSION: Could not be validated. Terminating...\n");
+		exit(1);
+	}
+	return offset;
 }
