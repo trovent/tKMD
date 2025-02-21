@@ -490,6 +490,13 @@ OFFSET SetOffsetsBasedOnWindowsVersion(void)
 		offset.THREAD_NOTIFY_OFFSET = 0x007aee10;
 		offset.PS_PROTECTION_OFFSET = 0x5fa;
 	}
+	else if (osInfo.dwMajorVersion == 10 && osInfo.dwMinorVersion == 0 && osInfo.dwBuildNumber == 22631)
+	{
+		offset.PROCESS_NOTIFY_OFFSET = 0x004f0b90;
+		offset.IMAGE_NOTIFY_OFFSET = 0x004f0910;
+		offset.THREAD_NOTIFY_OFFSET = 0x004f0af0;
+		offset.PS_PROTECTION_OFFSET = 0x87a;
+	}
 	else 
 	{
 		offset.PROCESS_NOTIFY_OFFSET = 0x00;
